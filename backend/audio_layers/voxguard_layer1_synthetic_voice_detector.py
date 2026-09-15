@@ -8,20 +8,12 @@ Model: AASIST (Jung et al., 2022) — SOTA on ASVspoof 2019 LA.
 Checkpoint: bundled pretrained weights from the official repo
     https://github.com/clovaai/aasist  (models/weights/AASIST.pth)
 
-Contract with the rest of the VoxGuard pipeline (Person D's fusion engine
-should call this exactly like this):
+detect() analyzes only the first ~4 seconds (AASIST's fixed input window).
+detect_full() slides that window across the ENTIRE clip and aggregates
+results — use this for anything longer than a few seconds, since audio
+past the first window is otherwise silently ignored.
 
-    from voxguard_layer1_synthetic_voice_detector import SyntheticVoiceDetector
-
-    detector = SyntheticVoiceDetector()
-    result = detector.detect("path/to/call_audio.wav")
-    # result = {
-    #     "synthetic_probability": 0.86,   # 0-1 float, >0.5 = likely AI-generated
-    #     "label": "synthetic",            # "synthetic" or "bonafide"
-    #     "raw_logits": [bonafide, spoof]  # for debugging / calibration
-    # }
-
-Requirements (install on your dev machine / Colab, NOT needed to read this file):
+Requirements:
     pip install torch soundfile librosa numpy
 """
 
@@ -32,12 +24,10 @@ import soundfile as sf
 import librosa
 
 # ---- Make the AASIST repo importable -----------------------------------
-# Assumes this file sits next to the cloned `aasist/` repo:
-#   git clone https://github.com/clovaai/aasist.git
 AASIST_REPO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "aasist")
 sys.path.insert(0, AASIST_REPO_PATH)
 
-import torch  # noqa: E402  (import after path setup, kept here for clarity)
+import torch  # noqa: E402
 from models.AASIST import Model as AASISTModel  # noqa: E402
 
 # ---- Model config (matches config/AASIST.conf in the official repo) ----
@@ -55,7 +45,6 @@ TARGET_SR = 16000
 NB_SAMP = MODEL_CONFIG["nb_samp"]
 
 DEFAULT_CHECKPOINT = os.path.join(AASIST_REPO_PATH, "models", "weights", "AASIST.pth")
-# For lower latency on real-time calls, swap to the lightweight variant:
 LIGHTWEIGHT_CHECKPOINT = os.path.join(AASIST_REPO_PATH, "models", "weights", "AASIST-L.pth")
 
 
@@ -64,8 +53,6 @@ def _pad_or_repeat(x: np.ndarray, max_len: int = NB_SAMP) -> np.ndarray:
 
     - If audio is longer than max_len: take the first max_len samples.
     - If shorter: tile (repeat) the waveform until it reaches max_len.
-    This is NOT silence-padding — AASIST was trained with repetition-padding,
-    so silence-padding here would hurt accuracy.
     """
     x_len = x.shape[0]
     if x_len >= max_len:
@@ -89,7 +76,6 @@ class SyntheticVoiceDetector:
         """Load an audio file and resample to 16kHz mono, matching training data."""
         waveform, sr = sf.read(audio_path, dtype="float32")
 
-        # Collapse stereo -> mono if needed
         if waveform.ndim > 1:
             waveform = waveform.mean(axis=1)
 
@@ -98,49 +84,73 @@ class SyntheticVoiceDetector:
 
         return waveform
 
-    def detect(self, audio_path: str) -> dict:
-        """
-        Run synthetic-voice detection on a single audio file (or a live-call
-        chunk saved to a temp .wav — see chunking note at the bottom of this file).
-
-        Returns a dict matching the contract described in the module docstring.
-        """
-        waveform = self._load_audio(audio_path)
+    def _score_window(self, waveform: np.ndarray) -> float:
+        """Run one ~4s window through the model, return synthetic probability."""
         waveform = _pad_or_repeat(waveform, NB_SAMP)
-
-        x = torch.from_numpy(waveform).float().unsqueeze(0).to(self.device)  # (1, 64600)
+        x = torch.from_numpy(waveform).float().unsqueeze(0).to(self.device)
 
         with torch.no_grad():
-            _, logits = self.model(x)              # logits shape: (1, 2) -> [bonafide, spoof]
-            probs = torch.softmax(logits, dim=1)[0]  # convert to a 0-1 probability
+            _, logits = self.model(x)
+            probs = torch.softmax(logits, dim=1)[0]
 
-        synthetic_probability = float(probs[1].item())
+        return float(probs[1].item())
+
+    def detect(self, audio_path: str) -> dict:
+        """
+        Analyzes only the FIRST ~4 seconds of audio (AASIST's fixed window).
+        Fast, but ignores anything after the first window — prefer
+        detect_full() for clips longer than a few seconds.
+        """
+        waveform = self._load_audio(audio_path)
+        synthetic_probability = self._score_window(waveform)
         label = "synthetic" if synthetic_probability > 0.5 else "bonafide"
 
         return {
             "synthetic_probability": round(synthetic_probability, 4),
             "label": label,
-            "raw_logits": logits[0].tolist(),
+        }
+
+    def detect_full(self, audio_path: str, window_sec: float = 4.0, hop_sec: float = 2.0) -> dict:
+        """
+        Analyzes the ENTIRE audio file by sliding a window across it,
+        instead of only looking at the first ~4 seconds. Aggregates
+        per-window scores into one overall result.
+
+        window_sec: length of each analysis window (matches AASIST's ~4s input)
+        hop_sec: how far to slide between windows (2s = 50% overlap)
+        """
+        full_waveform = self._load_audio(audio_path)
+        window_len = int(window_sec * TARGET_SR)
+        hop_len = int(hop_sec * TARGET_SR)
+
+        if len(full_waveform) <= window_len:
+            return self.detect(audio_path)
+
+        scores = []
+        start = 0
+        while start < len(full_waveform):
+            chunk = full_waveform[start:start + window_len]
+            scores.append(self._score_window(chunk))
+            start += hop_len
+
+        # Use MAX across windows — if any part of the call sounds synthetic,
+        # flag the whole call rather than averaging the signal away.
+        synthetic_probability = max(scores)
+        label = "synthetic" if synthetic_probability > 0.5 else "bonafide"
+
+        return {
+            "synthetic_probability": round(synthetic_probability, 4),
+            "label": label,
+            "num_windows_analyzed": len(scores),
+            "per_window_scores": [round(s, 4) for s in scores],
         }
 
 
 if __name__ == "__main__":
-    # Quick manual test:
-    #   python voxguard_layer1_synthetic_voice_detector.py path/to/audio.wav
     if len(sys.argv) < 2:
         print("Usage: python voxguard_layer1_synthetic_voice_detector.py <audio_file.wav>")
         sys.exit(1)
 
     detector = SyntheticVoiceDetector()
-    result = detector.detect(sys.argv[1])
+    result = detector.detect_full(sys.argv[1])
     print(result)
-
-# -----------------------------------------------------------------------
-# NOTE for real-time streaming (relevant to your "how it works" slide):
-# AASIST expects a fixed ~4-second window, not an open audio stream. For
-# live calls, buffer the incoming stream into overlapping ~4s windows
-# (e.g. every 2s, run detect() on the last 4s), and feed each window's
-# synthetic_probability into the Risk Engine as a rolling signal rather
-# than a single one-shot score. This also naturally handles calls longer
-# than 4 seconds without retraining the model.
-# -----------------------------------------------------------------------

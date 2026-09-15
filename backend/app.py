@@ -1,8 +1,10 @@
 """
-VoxGuard — Live Demo Dashboard
-================================
-Run: streamlit run app.py
-(or: python -m streamlit run app.py)
+VoxGuard — Live Demo Dashboard (Streamlit)
+=============================================
+Internal testing UI / fallback demo — kept alongside the FastAPI backend
+in api/main.py, which is what the separate frontend/ talks to.
+
+Run (from inside backend/): python -m streamlit run app.py
 """
 
 import streamlit as st
@@ -11,6 +13,9 @@ import os
 import time
 import sounddevice as sd
 import soundfile as sf
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from audio_layers.voxguard_layer1_synthetic_voice_detector import SyntheticVoiceDetector
 import speaker_id.voxguard_layer2_speaker_verification as vg2
@@ -52,7 +57,7 @@ st.divider()
 st.subheader("2. Analyze an incoming call")
 test_file = st.file_uploader("Upload call audio (.wav)", type=["wav"], key="test")
 
-def render_result(final: dict, transcript: str):
+def render_result(final: dict, transcript: str, synth_result: dict):
     st.divider()
     st.subheader("VOICE SECURITY ANALYSIS")
 
@@ -63,6 +68,9 @@ def render_result(final: dict, transcript: str):
     with col2:
         st.metric("Intent Category", final['intent_category'])
         st.metric("Matched Speaker", final['matched_name'] or "—")
+
+    if "num_windows_analyzed" in synth_result:
+        st.caption(f"Synthetic-voice check analyzed {synth_result['num_windows_analyzed']} overlapping windows across the full clip.")
 
     st.divider()
 
@@ -87,13 +95,13 @@ if st.button("Run Analysis") and test_file:
         tmp_path = tmp.name
 
     with st.spinner("Analyzing voice, speaker identity, and call context..."):
-        synth_result = detector.detect(tmp_path)
+        synth_result = detector.detect_full(tmp_path)
         watch_result = vg2.check_watchlist(tmp_path)
         context_result = analyze_context(tmp_path)
         final = compute_risk(synth_result, watch_result, context_result)
 
     os.unlink(tmp_path)
-    render_result(final, context_result["transcript"])
+    render_result(final, context_result["transcript"], synth_result)
 
 st.divider()
 
@@ -105,7 +113,7 @@ st.caption("Records short chunks from your mic and analyzes each one — simulat
 
 CHUNK_SECONDS = 4
 SAMPLE_RATE = 16000
-MAX_CHUNKS = 15  # safety cap so it doesn't run forever
+MAX_CHUNKS = 15
 
 if "live_running" not in st.session_state:
     st.session_state.live_running = False
@@ -136,7 +144,7 @@ if st.session_state.live_running:
 
         with live_placeholder.container():
             st.info("Analyzing chunk...")
-            synth_result = detector.detect(chunk_path)
+            synth_result = detector.detect_full(chunk_path)
             watch_result = vg2.check_watchlist(chunk_path)
             context_result = analyze_context(chunk_path)
             final = compute_risk(synth_result, watch_result, context_result)

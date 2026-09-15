@@ -1,8 +1,8 @@
-.env
-venv/
-__pycache__/
-*.pyc
+backend/.env
+backend/**/__pycache__/
+backend/**/*.pyc
+backend/pretrained_ecapa/
+backend/data/*.wav
+backend/live_chunk.wav
 .idea/
-pretrained_ecapa/
-*.pth
-data/*.wav
+venv/

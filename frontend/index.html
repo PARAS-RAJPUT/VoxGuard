@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VoxGuard — Voice Security Analysis</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="logo">🛡️ VoxGuard</div>
+      <p class="tagline">Real-Time Voice Cloning & Impersonation Detection — SIH 2026 | PS 26104</p>
+    </header>
+
+    <section class="card">
+      <h2>1. Enroll a known speaker (watchlist)</h2>
+      <div class="field">
+        <label for="enrollName">Speaker name</label>
+        <input type="text" id="enrollName" placeholder="e.g. Sarvagya">
+      </div>
+      <div class="field">
+        <label for="enrollFile">Reference voice (.wav)</label>
+        <input type="file" id="enrollFile" accept=".wav">
+      </div>
+      <button id="enrollBtn">Enroll Speaker</button>
+      <p id="enrollStatus" class="status"></p>
+    </section>
+
+    <section class="card">
+      <h2>2. Analyze an incoming call</h2>
+      <div class="field">
+        <label for="analyzeFile">Call audio (.wav)</label>
+        <input type="file" id="analyzeFile" accept=".wav">
+      </div>
+      <button id="analyzeBtn">Run Analysis</button>
+      <p id="analyzeStatus" class="status"></p>
+    </section>
+
+    <section class="card">
+      <h2>3. Live Microphone Monitoring</h2>
+      <p class="hint">Records short chunks from your mic and analyzes each one — simulates real-time call monitoring.</p>
+      <div class="live-controls">
+        <button id="startLiveBtn">Start Live Monitoring</button>
+        <button id="stopLiveBtn" disabled>Stop Live Monitoring</button>
+      </div>
+      <p id="liveStatus" class="status"></p>
+    </section>
+
+    <section id="resultCard" class="card result-card hidden">
+      <h2>VOICE SECURITY ANALYSIS</h2>
+
+      <div class="metrics-grid">
+        <div class="metric">
+          <span class="metric-label">Synthetic Probability</span>
+          <span class="metric-value" id="metricSynthetic">—</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">Watchlist Match</span>
+          <span class="metric-value" id="metricWatchlist">—</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">Intent Category</span>
+          <span class="metric-value" id="metricIntent">—</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">Matched Speaker</span>
+          <span class="metric-value" id="metricSpeaker">—</span>
+        </div>
+      </div>
+
+      <div class="risk-block">
+        <div class="risk-header">
+          <span id="riskDot" class="risk-dot"></span>
+          <span id="riskLevel" class="risk-level">—</span>
+        </div>
+        <div class="risk-score" id="riskScore">—/100</div>
+        <p class="risk-caption">Fused score across voice authenticity, watchlist match, and call-intent signals.</p>
+      </div>
+
+      <div class="reasons-block">
+        <h3>Why</h3>
+        <ul id="reasonsList"></ul>
+      </div>
+
+      <div class="action-block">
+        <h3>Recommended Action</h3>
+        <p id="actionText">—</p>
+      </div>
+
+      <details class="transcript-block">
+        <summary>Transcript</summary>
+        <p id="transcriptText">—</p>
+      </details>
+    </section>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
