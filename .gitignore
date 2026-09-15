@@ -1,0 +1,8 @@
+.env
+venv/
+__pycache__/
+*.pyc
+.idea/
+pretrained_ecapa/
+*.pth
+data/*.wav
