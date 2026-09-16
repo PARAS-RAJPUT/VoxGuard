@@ -107,7 +107,7 @@ python -m streamlit run app.py
 
 - The synthetic voice detector, like all anti-spoofing models, generalizes
   better to attack types present in its training data (ASVspoof) than to
-  newer/unseen TTS systems — a known open problem in anti-spoofing
+  newer/unseen TTS systems — known open problem in anti-spoofing
   research, not unique to this implementation.
 - The watchlist in this demo uses synthetic/self-enrolled data, not a real
   law-enforcement or telecom database. In production this would integrate
